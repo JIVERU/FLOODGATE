@@ -91,7 +91,7 @@ def apply_filter(df, search_term, search_id, selected_regions, selected_province
 def get_filters(df):
     """Renders sidebar filters and returns filtered dataframe"""
     with st.sidebar:
-        st.subheader("zearch and Filter")
+        st.subheader("Search and Filter")
         search_term = st.text_input("Project Name", placeholder="e.g., River Wall", key="search_term")
         search_id = st.text_input("Project ID", placeholder="e.g., P00...", key="search_id")
 
