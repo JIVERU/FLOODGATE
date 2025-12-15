@@ -9,11 +9,15 @@ from utils import (
 st.set_page_config(layout="centered", page_title="Exploration")
 load_css()
 
-df = load_data()
-clean_df = prep_data(df)
-filtered_df = get_filters(clean_df)
+
 
 st.markdown('<div class="title-card">Data exploration</div>', unsafe_allow_html=True)
+
+if 'filtered_df' in st.session_state and 'inputs' in st.session_state:
+    filtered_df = st.session_state['filtered_df']
+else:
+    st.error("Data not initialized. Please run the app from main.")
+    st.stop()
 
 if filtered_df.empty:
     st.warning("No data matches your current filters. Please adjust the sidebar filters.")
@@ -84,6 +88,19 @@ else:
     with st.container(border=True):
         if fig_vol: st.plotly_chart(fig_vol, width='stretch')
         else: st.info("No contractor data available.")
+
+    st.markdown('<div class="section-title">Descriptive Statistics</div>', unsafe_allow_html=True)
+    desc_cols = [
+        'FundingYear',
+        'ApprovedBudgetForContract',
+        'ContractCost',
+        'ContractorCount',
+        'Duration',
+        'BudgetDifference',
+        'BudgetVariance',
+        'RiskScore'
+    ]
+    st.dataframe(filtered_df[desc_cols].describe().round(2),width='stretch')
 
 st.markdown(
     """

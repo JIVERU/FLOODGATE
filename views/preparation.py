@@ -3,8 +3,11 @@ import pandas as pd
 from utils import load_css, load_data, prep_data
 
 st.set_page_config(layout="centered", page_title="Preparation")
-load_css()
-df = load_data()
+if 'df' in st.session_state:
+    df = st.session_state['df']
+else:
+    st.error("Data not initialized. Please run the app from main.")
+    st.stop()
 
 st.markdown('<div class="title-card">Preparing the dataset</div>', unsafe_allow_html=True)
 original_row_count = len(df)
@@ -60,7 +63,7 @@ with col1:
         st.markdown("""
             `ContractCost / ApprovedBudget`
             
-            Measures budget utilization (0.0 to 1.0). A score of **1.0** means the bid matched the budget ceiling exactly, a red flag for bid-rigging.""")
+            Measures budget utilization (0 to 1). A score of **1** means the bid matched the budget ceiling exactly""")
     with st.container(border=True):
         st.subheader("BudgetDifference")
         st.markdown("""
@@ -79,7 +82,7 @@ with col2:
     with st.container(border=True):
         st.subheader("IsSuspicious")
         st.markdown("""
-            `RiskScore > 0.99` (Boolean)
+            `RiskScore >= 1` (Boolean)
             
             An automated audit trigger. Flags projects where the contract cost is within **1%** of the budget, prioritizing them for fraud detection.""")
 

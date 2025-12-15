@@ -5,10 +5,12 @@ from data.mapping_dicts import column_interpretations
 from utils import load_data, prep_data, load_css
 
 st.set_page_config(page_title="FloodGate", layout="centered")
+if 'df' in st.session_state:
+    df = st.session_state['df']
+else:
+    st.error("Data not initialized. Please run the app from main.")
+    st.stop()
 
-load_css()
-df = load_data()
-clean_df = prep_data(df)
 cols_to_clean = ['ContractCost', 'ApprovedBudgetForContract']
 for col in cols_to_clean:
     if col in df.columns:
@@ -30,10 +32,10 @@ with col1:
         <div class="section-title">Project Overview</div>
         <p>
             Year after year, persistent flooding devastates Filipino communities, raising urgent questions about 
-            public spending integrity. This project analyzes the DPWH Flood Control Projects dataset to uncover 
-            the key geospatial and operational factors driving infrastructure costs and anomalies. 
-            We seek to find where flood mitigation funds are concentrated, why certain projects inflate into costly 
-            anomalies, and what project attributes truly drive the final price tag of our collective safety
+            public spending integrity. This project used the DPWH Flood Control Projects dataset to analyze and uncover 
+            anomalies and possible corruption in funding allocation.
+            We seek to find where flood mitigation funds are concentrated and why certain projects inflate into costly 
+            anomalies.
         </p>""", unsafe_allow_html=True)
 
 with col2:
@@ -48,10 +50,7 @@ st.markdown("""
             <b>How are DPWH flood-control projects distributed geographically across regions and provinces?</b>
         </div>
         <div class="custom-box" style='margin-bottom: 10px;'>
-            <b>Are there anomalous or unusually high-cost projects that deviate from normal regional or national patterns?</b>
-        </div>
-        <div class="custom-box" style='margin-bottom: 10px;'>
-            <b>What project attributes significantly influence project funding levels?</b>
+            <b>Are there anomalous projects that deviate from normal regional or national patterns?</b>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -61,18 +60,13 @@ st.markdown("""
         <div class="grid-container">
             <div class="method-card" style="border-top-color: #17a2b8;">
                 <h3>Geospatial Analysis</h3>
-                <p><strong>Descriptive & Geospatial</strong></p>
-                <p>Examines the spatial distribution of flood-control projects by mapping coordinates, identifying geographic clusters, and highlighting regions with high or low project density. This helps reveal spatial patterns, accessibility gaps, and allocation trends across provinces.</p>
-            </div>
-            <div class="method-card" style="border-top-color: #ffc107;">
-                <h3>Linear Regression</h3>
-                <p><strong>Clustering & Correlation</strong></p>
-                <p>Analyzes relationships between project attributes—such as contract cost, budget, and project duration to determine significant predictors of project cost. Clustering groups areas with similar profiles, while correlation identifies variables with strong statistical influence.</p>
+                <p><strong>Clustering & Map Projection</strong></p>
+                <p>Examines the spatial distribution of flood-control projects by mapping coordinates, identifying geographic clusters, and highlighting regions with high or low project density. </p>
             </div>
             <div class="method-card" style="border-top-color: #dc3545;">
                 <h3>Anomaly Detection</h3>
                 <p><strong>Outliers & Anomalies</strong></p>
-                <p>Identifies unusually high-cost or irregular projects using statistical outlier detection. Visualizations such as boxplots and scatter maps are used to flag deviations for deeper inspection and audit transparency.</p>
+                <p>Identify rare events, observations, or data points that deviate significantly from the normal behavior or patterns within a dataset.</p>
             </div>
     </div>
     """, unsafe_allow_html=True)

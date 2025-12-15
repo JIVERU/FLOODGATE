@@ -64,3 +64,5 @@ column_interpretations = {
     "ProvincialCapitalLatitude": "Latitude of the provincial capital.",
     "ProvincialCapitalLongitude": "Longitude of the provincial capital."
 }
+
+CLUSTER_COLORS = ['red', 'blue', 'green', 'purple', 'orange', 'darkred', 'lightred', 'beige', 'darkblue', 'cadetblue']

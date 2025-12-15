@@ -1,20 +1,14 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-import folium as fm
-from folium import TileLayer, FeatureGroup, CircleMarker, Popup, LayerControl
 import branca.element
-import plotly.express as px
+import folium as fm
 import matplotlib.pyplot as plt
+import pandas as pd
+import plotly.express as px
 import seaborn as sns
-import math
+import streamlit as st
+from folium import TileLayer
 from sklearn.cluster import KMeans
-from sklearn.preprocessing import StandardScaler
-import streamlit.components.v1 as components
-
-# Import your dictionaries from your data folder as originally structured
-# Or define them here if mapping_dicts.py doesn't exist yet
-from data.mapping_dicts import TypeOfWork_full_color, TypeOfWork_dict, column_interpretations
+from data.mapping_dicts import TypeOfWork_full_color, TypeOfWork_dict, CLUSTER_COLORS
+import numpy as np
 
 def load_css():
     with open("styles/main.css") as f:
@@ -61,7 +55,7 @@ def prep_data(data):
     clean['BudgetDifference'] = clean['ApprovedBudgetForContract'] - clean['ContractCost']
     clean['BudgetVariance'] = (clean['BudgetDifference'] / clean['ApprovedBudgetForContract']) * 100
     clean['RiskScore'] = (clean['ContractCost'] / clean['ApprovedBudgetForContract'])
-    clean['IsSuspicious'] = clean['RiskScore'] > 0.99
+    clean['IsSuspicious'] = clean['RiskScore'] > 1
 
     col_map = {'ProjectLatitude': 'latitude', 'ProjectLongitude': 'longitude'}
     clean = clean.rename(columns=col_map)
@@ -69,50 +63,107 @@ def prep_data(data):
 
     return clean
 
-def apply_filter(df, search_term, search_id, selected_regions, selected_provinces, selected_works, selected_years):
-    filtered_df = df.copy()
+def apply_filter(df, inputs):
+    df = df.copy()
 
-    if search_term:
-        filtered_df = filtered_df[filtered_df['ProjectName'].str.contains(search_term, case=False, na=False)]
-    if search_id:
-        filtered_df = filtered_df[filtered_df['ProjectId'].str.astype(str).str.contains(search_id, case=False, na=False)]
-    if selected_regions:
-        filtered_df = filtered_df[filtered_df['Region'].isin(selected_regions)]
-    if selected_provinces:
-        filtered_df = filtered_df[filtered_df['Province'].isin(selected_provinces)]
-    if selected_works:
-        filtered_df = filtered_df[filtered_df['TypeOfWork'].isin(selected_works)]
-    if selected_years:
-        filtered_df = filtered_df[
-            (filtered_df['FundingYear'] >= selected_years[0]) &
-            (filtered_df['FundingYear'] <= selected_years[1])]
-    return filtered_df
+    mask = pd.Series([True] * len(df), index=df.index)
+
+    if inputs['search_term']:
+        mask &= df['ProjectName'].str.contains(inputs['search_term'], case=False, na=False)
+    if inputs['search_id']:
+        mask &= df['ProjectId'].astype(str).str.contains(inputs['search_id'], case=False, na=False)
+    if inputs['selected_regions']:
+        mask &= df['Region'].isin(inputs['selected_regions'])
+    if inputs['selected_provinces']:
+        mask &= df['Province'].isin(inputs['selected_provinces'])
+    if inputs['selected_contractors']:
+        mask &= df['Contractor'].isin(inputs['selected_contractors'])
+    if inputs['selected_works']:
+        mask &= df['TypeOfWork'].isin(inputs['selected_works'])
+    if inputs['selected_years']:
+        mask &= (df['FundingYear'] >= inputs['selected_years'][0]) & (df['FundingYear'] <= inputs['selected_years'][1])
+    if inputs.get('cost_range'):
+        min_c, max_c = inputs['cost_range']
+        mask &= (df['ContractCost'] >= min_c) & (df['ContractCost'] <= max_c)
+    if inputs.get('duration_range'):
+        min_d, max_d = inputs['duration_range']
+        mask &= (df['Duration'] >= min_d) & (df['Duration'] <= max_d)
+    risk_option = inputs.get('risk_filter')
+    if risk_option == "Exact Match (Score = 1.0)":
+        mask &= np.isclose(df['RiskScore'], 1.0)
+    elif risk_option == "Over Budget (Score > 1.0)":
+        mask &= (df['RiskScore'] > 1.0)
+    elif risk_option == "At or Above Budget (Score ≥ 1.0)":
+        mask &= (df['RiskScore'] >= 1.0)
+    return df[mask]
 
 def get_filters(df):
-    """Renders sidebar filters and returns filtered dataframe"""
+    inputs = {}
+
     with st.sidebar:
-        st.subheader("Search and Filter")
-        search_term = st.text_input("Project Name", placeholder="e.g., River Wall", key="search_term")
-        search_id = st.text_input("Project ID", placeholder="e.g., P00...", key="search_id")
+        st.header("Project Filters")
+        inputs['risk_filter'] = st.radio("Filter by Risk Score",["All Projects", "Exact Match (Score = 1.0)", "Over Budget (Score > 1.0)", "At or Above Budget (Score ≥ 1.0)"],index=0,key=f"risk_radio")
+        inputs['search_term'] = st.text_input("Project Name", placeholder="e.g., River Wall", key="search_term")
+        inputs['search_id'] = st.text_input("Project ID", placeholder="e.g., P00...", key="search_id")
 
         regions = sorted(df['Region'].unique().tolist())
-        selected_regions = st.multiselect("Region", regions)
+        inputs['selected_regions'] = st.multiselect("Region", regions)
 
         provinces = sorted(df['Province'].unique().tolist())
-        selected_provinces = st.multiselect("Province", provinces)
+        inputs['selected_provinces'] = st.multiselect("Province", provinces)
+
+        top_contractors = df['Contractor'].value_counts().index.tolist()
+        inputs['selected_contractors'] = st.multiselect("Contractor", top_contractors)
 
         work_keys = sorted(TypeOfWork_dict.keys())
         selected_work_keys = st.multiselect("Type of Work", work_keys)
-        selected_works = [TypeOfWork_dict[k] for k in selected_work_keys]
+        inputs['selected_works'] = [TypeOfWork_dict[k] for k in selected_work_keys]
 
         if 'FundingYear' in df.columns:
             min_y = int(df['FundingYear'].min())
             max_y = int(df['FundingYear'].max())
-            selected_years = st.slider("Funding Year", min_y, max_y, (min_y, max_y))
+            inputs['selected_years'] = st.slider("Funding Year", min_y, max_y, (min_y, max_y))
         else:
-            selected_years = None
+            inputs['selected_years'] = None
+        min_cost = int(df['ContractCost'].min())
+        max_cost = int(df['ContractCost'].max())
+        if pd.isna(min_cost): min_cost = 0
+        if pd.isna(max_cost): max_cost = 1
 
-        return apply_filter(df, search_term, search_id, selected_regions, selected_provinces, selected_works, selected_years)
+        manual = st.toggle("Manual Cost Input", value=False, key=f"toggle_cost")
+
+        if manual:
+            c1, c2 = st.columns(2)
+            min_val = c1.number_input("Min Cost (PHP)", value=min_cost, min_value=0, key=f"min_cost")
+            max_val = c2.number_input("Max Cost (PHP)", value=max_cost, min_value=0, key=f"max_cost")
+            inputs['cost_range'] = (min_val, max_val)
+        else:
+            inputs['cost_range'] = st.slider("Contract Cost Range",min_value=min_cost,max_value=max_cost,value=(min_cost, max_cost),format="₱%d",key="cost_range")
+        use_manual_dur = st.toggle("Manual Duration Input", value=False, key=f"toggle_dur")
+
+        min_dur = int(df['Duration'].min())
+        max_dur = int(df['Duration'].max())
+        if use_manual_dur:
+            c3, c4 = st.columns(2)
+            min_d_val = c3.number_input("Min Duration (Days)", value=min_dur, key=f"min_dur")
+            max_d_val = c4.number_input("Max Duration (Days)", value=max_dur, key=f"max_dur")
+            inputs['duration_range'] = (min_d_val, max_d_val)
+        else:
+            inputs['duration_range'] = st.slider(
+                "Duration Range (Days)",
+                min_value=min_dur,
+                max_value=max_dur,
+                value=(min_dur, max_dur),
+                format="%d days",
+                key=f"slider_dur"
+            )
+
+        inputs['enable_clustering'] = st.toggle("Enable Clustering")
+        if inputs['enable_clustering']:
+            inputs['n_clusters'] = st.slider("Number of Zones (k)", 2, 10, 3)
+        else:
+            inputs['n_clusters'] = 3
+    return inputs
 
 @st.cache_data
 def get_island_fig(df, chart_type):
@@ -174,7 +225,7 @@ def get_contractor_figs(df):
     if not con_val.empty:
         fig_val = px.bar(con_val, x='ContractCost', y='Contractor', orientation='h',
                          title=f"Top {20} Contractors by Value",
-                         text_auto='.2s', color='ContractCost', color_continuous_scale='Viridis')
+                         text_auto='.2~s', color='ContractCost', color_continuous_scale='Viridis')
         fig_val.update_layout(yaxis={'categoryorder':'total ascending'}, height=dynamic_height)
     else:
         fig_val = None
@@ -189,118 +240,97 @@ def get_contractor_figs(df):
         fig_vol = None
     return fig_val, fig_vol
 
-# Non-cached plot functions (matplotlib returns figs)
-def plot_benfords_law(df):
-    def get_first_digit(x):
-        s = str(x).replace('.', '').replace(',', '')
-        for char in s:
-            if char.isdigit() and char != '0':
-                return int(char)
-        return np.nan
-
-    first_digits = df['ContractCost'].apply(get_first_digit).dropna()
-    digit_counts = first_digits.value_counts().sort_index()
-    total_counts = digit_counts.sum()
-    if total_counts == 0: return None
-
-    observed_freq = (digit_counts / total_counts) * 100
-    benford_expected = {d: math.log10(1 + 1/d) * 100 for d in range(1, 10)}
-
-    plot_data = pd.DataFrame({
-        'Digit': range(1, 10),
-        'Observed': [observed_freq.get(d, 0) for d in range(1, 10)],
-        'Expected': [benford_expected[d] for d in range(1, 10)]
-    }).melt(id_vars='Digit', var_name='Type', value_name='Frequency (%)')
-
-    fig, ax = plt.subplots(figsize=(10, 5))
-    sns.barplot(data=plot_data, x='Digit', y='Frequency (%)', hue='Type', ax=ax, palette=['#1f77b4', '#ff7f0e'])
-    ax.set_title("Benford's Law Analysis (Fraud Detection)")
-    ax.set_ylabel("Frequency (%)")
-    ax.grid(axis='y', linestyle='--', alpha=0.7)
-    return fig
-
-def plot_clustering(df):
-    cluster_data = df[['ContractCost', 'Duration']].dropna()
-    if len(cluster_data) < 10: return None
-    cluster_data['Log_Cost'] = np.log1p(cluster_data['ContractCost'])
-    cluster_data['Log_Duration'] = np.log1p(cluster_data['Duration'])
-
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(cluster_data[['Log_Cost', 'Log_Duration']])
-    kmeans = KMeans(n_clusters=4, random_state=42, n_init=10)
-    cluster_data['Cluster'] = kmeans.fit_predict(X_scaled)
-
-    fig, ax = plt.subplots(figsize=(10, 6))
-    sns.scatterplot(
-        data=cluster_data, x='Duration', y='ContractCost',
-        hue='Cluster', palette='viridis', style='Cluster', s=100, ax=ax
-    )
-    ax.set_xscale('log')
-    ax.set_xscale('log')
-    ax.set_yscale('log')
-    ax.set_title("Project Clusters: Cost vs. Duration (Anomaly Detection)")
-    ax.set_xlabel("Duration (Days) - Log Scale")
-    ax.set_ylabel("Contract Cost (PHP) - Log Scale")
-    return fig
-
 def plot_bid_variance(df):
     df_zoom = df[(df['BudgetVariance'] > -5) & (df['BudgetVariance'] < 10)]
     fig, ax = plt.subplots(figsize=(10, 5))
     sns.histplot(df_zoom['BudgetVariance'], bins=50, kde=True, color='darkred', ax=ax)
     ax.axvline(0, color='black', linestyle='--', label='Exact Budget Match')
-    ax.set_title("Bid Variance Distribution (Detection of Bid Rigging)")
+    ax.set_title("Bid Variance Distribution")
     ax.set_xlabel("Variance % (0 = Bid matched Budget exactly)")
     ax.legend()
     return fig
 
-def plot_top_contractors(df):
-    top = df.groupby('Contractor')['ContractCost'].sum().sort_values(ascending=False).head(20)
-    fig, ax = plt.subplots(figsize=(14, 6))
-    sns.barplot(y=top.index, x=top.values, palette='mako', ax=ax)
-    ax.set_xlabel("Total Contract Value (PHP)")
-    ax.set_title("Top 20 Contractors by Market Share")
-    return fig
 
-@st.cache_resource
-def create_map(df, center, zoom):
-    try:
-        m = fm.Map(location=center, zoom_start=zoom, control_scale=True, prefer_canvas=True, tiles=None)
-        TileLayer(
-            tiles="https://controlmap.mgb.gov.ph/arcgis/rest/services/GeospatialDataInventory_Public/GDI_Detailed_Flood_Susceptibility_Public/MapServer/tile/{z}/{y}/{x}",
-            attr="MGB Flood Hazard", name="MGB Flood Susceptibility", overlay=True, control=True, show=False, opacity=0.5
-        ).add_to(m)
-        TileLayer(
-            tiles="https://controlmap.mgb.gov.ph/arcgis/rest/services/GeospatialDataInventory_Public/GDI_Detailed_Rain_induced_Landslide_Susceptibility_Public/MapServer/tile/{z}/{y}/{x}",
-            attr="MGB Rain/Landslide",
-            name="MGB Rain Induced Landslide Susceptibility",
-            overlay=True,
-            control=True,
-            show=False,
-            opacity=0.5
-        ).add_to(m)
+def perform_clustering(df, n_clusters):
+    cluster_df = df.copy()
 
-        TileLayer("Esri.WorldImagery", name="Satellite", show=True).add_to(m)
-        TileLayer("CartoDB.DarkMatter", name="Dark Mode", show=False).add_to(m)
-        TileLayer("OpenStreetMap", name="Street Map", show=False).add_to(m)
+    if len(cluster_df) < n_clusters:
+        return None, None
 
-        fm.plugins.Fullscreen(position="bottomleft", title="Expand me", title_cancel="Exit me", force_separate_button=True).add_to(m)
-        fg = fm.FeatureGroup(name="DPWH Projects (Markers)")
+    X = cluster_df[['latitude', 'longitude']]
 
-        if not df.empty:
-            # Vectorized data extraction for speed
-            id, lats, lons = df['ProjectId'].values, df['latitude'].values, df['longitude'].values
-            names, regions, costs = df['ProjectName'].values, df['Region'].values, df['ContractCost'].values
-            startdates, enddates, durations = df['StartDate'].values, df['ActualCompletionDate'].values, df['Duration'].values
-            contractors, fundingyears = df['Contractor'].values, df['FundingYear'].values
-            legDist, Municipality, engDist = df['LegislativeDistrict'].values, df['Municipality'].values, df['DistrictEngineeringOffice'].values
-            risks, tow_vals = df['RiskScore'].values, df['TypeOfWork'].values
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
 
-            for pid, lat, lon, name, region, cost, start, end, dur, cont, fund, ld, mun, ed, risk, tow in zip(id, lats, lons, names, regions, costs, startdates, enddates, durations, contractors, fundingyears, legDist, Municipality, engDist, risks, tow_vals):
-                formatted_cost = f"₱{cost:,.2f}"
-                popup_html = f"""
+    cluster_df['Cluster_ID'] = kmeans.fit_predict(X)
+
+    stats = cluster_df.groupby('Cluster_ID').agg({
+        'ContractCost': ['count', 'mean', 'min', 'max'],
+        'Duration': 'mean',
+        'RiskScore': 'mean'
+    }).reset_index()
+
+    stats.columns = ['Cluster Zone', 'Project Count', 'Avg Cost', 'Min Cost', 'Max Cost', 'Avg Duration (Days)', 'Avg Risk Score']
+
+    stats['Avg Cost'] = stats['Avg Cost'].apply(lambda x: f"₱{x:,.0f}")
+    stats['Min Cost'] = stats['Min Cost'].apply(lambda x: f"₱{x:,.0f}")
+    stats['Max Cost'] = stats['Max Cost'].apply(lambda x: f"₱{x:,.0f}")
+    stats['Avg Duration (Days)'] = stats['Avg Duration (Days)'].round(0)
+    stats['Avg Risk Score'] = stats['Avg Risk Score'].round(4)
+    return cluster_df, stats
+
+def create_map(df, center, zoom, n_clusters=3, enabled_clustering=False):
+    if enabled_clustering:
+        df, stats = perform_clustering(df, n_clusters)
+    else:
+        stats = []
+
+    m = fm.Map(location=center, zoom_start=zoom, control_scale=True, prefer_canvas=True, tiles=None)
+    TileLayer(
+        tiles="https://controlmap.mgb.gov.ph/arcgis/rest/services/GeospatialDataInventory_Public/GDI_Detailed_Flood_Susceptibility_Public/MapServer/tile/{z}/{y}/{x}",
+        attr="MGB Flood Hazard", name="MGB Flood Susceptibility", overlay=True, control=True, show=False, opacity=0.5
+    ).add_to(m)
+    TileLayer(
+        tiles="https://controlmap.mgb.gov.ph/arcgis/rest/services/GeospatialDataInventory_Public/GDI_Detailed_Rain_induced_Landslide_Susceptibility_Public/MapServer/tile/{z}/{y}/{x}",
+        attr="MGB Rain/Landslide",
+        name="MGB Rain Induced Landslide Susceptibility",
+        overlay=True,
+        control=True,
+        show=False,
+        opacity=0.5
+    ).add_to(m)
+
+    TileLayer("Esri.WorldImagery", name="Satellite", show=True).add_to(m)
+    TileLayer("CartoDB.DarkMatter", name="Dark Mode", show=False).add_to(m)
+    TileLayer("OpenStreetMap", name="Street Map", show=False).add_to(m)
+
+    fm.plugins.Fullscreen(position="bottomleft", title="Expand me", title_cancel="Exit me", force_separate_button=True).add_to(m)
+    fg = fm.FeatureGroup(name="DPWH Projects)")
+
+    if not df.empty:
+        id, lats, lons = df['ProjectId'].values, df['latitude'].values, df['longitude'].values
+        names, regions, costs = df['ProjectName'].values, df['Region'].values, df['ContractCost'].values
+        startdates, enddates, durations = df['StartDate'].values, df['ActualCompletionDate'].values, df['Duration'].values
+        contractors, fundingyears = df['Contractor'].values, df['FundingYear'].values
+        legDist, Municipality, engDist = df['LegislativeDistrict'].values, df['Municipality'].values, df['DistrictEngineeringOffice'].values
+        risks, tow_vals = df['RiskScore'].values, df['TypeOfWork'].values
+
+        if enabled_clustering:
+            cluster_ids = df['Cluster_ID'].values
+        else:
+            cluster_ids = [0] * len(df)
+
+        for pid, lat, lon, name, region, cost, start, end, dur, cont, fund, ld, mun, ed, risk, tow, cluster_id in zip(id, lats, lons, names, regions, costs, startdates, enddates, durations, contractors, fundingyears, legDist, Municipality, engDist, risks, tow_vals, cluster_ids):
+            formatted_cost = f"₱{cost:,.2f}"
+            cid = int(cluster_id)
+            if enabled_clustering:
+                color = CLUSTER_COLORS[cid % len(CLUSTER_COLORS)]
+            else:
+                color = TypeOfWork_full_color.get(tow, 'blue')
+            popup_html = f"""
                             <div style="font-family: sans-serif; font-size: 12px; line-height: 1.4; color: #333;">
                                 <b style="font-size: 14px; color: #000;">{name}</b><br>
                                 <span style="color: #006400; font-weight: bold;">{formatted_cost}</span> &bull; {tow} &bull; FY {fund}
+                                <span style="color:{color}; font-weight:bold;"> {"Zone "+ str(cid) if enabled_clustering else ""}</span><br>
                                 <hr style="margin: 8px 0; border: 0; border-top: 1px solid #ccc;">
                                 <b>Loc:</b> {mun}, {ld} ({region})<br>
                                 <b>Eng:</b> {ed}<br>
@@ -309,15 +339,13 @@ def create_map(df, center, zoom):
                                 <b>Risk Score: {risk:.2f} </b>
                             </div>
                         """
-                iframe = branca.element.IFrame(html=popup_html, width="520px", height="180px")
-                pp = fm.Popup(iframe, max_width=500)
-                mark = fm.CircleMarker(
-                    location=[lat, lon], radius=3, fill=True, fill_opacity=0.7, tooltip=f"Project ID: {pid}", popup=pp,
-                    fill_color=TypeOfWork_full_color.get(tow, 'blue'), color=TypeOfWork_full_color.get(tow, 'blue')
-                )
-                fg.add_child(mark)
-        fg.add_to(m)
-        fm.LayerControl(position='bottomleft').add_to(m)
-        return m
-    except Exception as e:
-        st.error(f"Error creating map: {e}")
+            iframe = branca.element.IFrame(html=popup_html, width="520px", height="190px")
+            pp = fm.Popup(iframe, max_width=500)
+            mark = fm.CircleMarker(
+                location=[lat, lon], radius=3, fill=True, fill_opacity=0.7, tooltip=f"Project ID: {pid}", popup=pp,
+                fill_color=color, color=color
+            )
+            fg.add_child(mark)
+    fg.add_to(m)
+    fm.LayerControl(position='bottomleft').add_to(m)
+    return m, stats

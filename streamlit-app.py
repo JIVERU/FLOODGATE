@@ -1,40 +1,48 @@
 import streamlit as st
 
-# Define pages
+from utils import load_data, prep_data, get_filters, load_css, apply_filter
+
+load_css()
+CENTER = (11.891783, 122.419922)
+if "center" not in st.session_state:
+    st.session_state["center"] = CENTER
+if "zoom" not in st.session_state:
+    st.session_state["zoom"] = 6
+
+df = load_data()
+st.session_state["df"] = df
+clean_df = prep_data(df)
+inputs = get_filters(clean_df)
+st.session_state["inputs"] = inputs
+filtered_df = apply_filter(clean_df, inputs)
+st.session_state["filtered_df"] = filtered_df
+
 home_page = st.Page(
     page="views/overview.py",
     title="Overview",
-    icon=":material/account_circle:",
     default=True
 )
 
-# --- Data subsections ---
 preparation_page = st.Page(
     page="views/preparation.py",
     title="Preparation",
-    icon=":material/insights:",
 )
 
 data_exploration_page = st.Page(
     page="views/exploration.py",
     title="Exploration",
-    icon=":material/bar_chart:",
 )
 
-# Other sections
 analysis_page = st.Page(
     page="views/analysis.py",
     title="Analysis",
-    icon=":material/business_center:",
 )
 
 conclusions_page = st.Page(
     page="views/conclusions.py",
     title="Conclusions",
-    icon=":material/business_center:",
 )
 
-# Navigation with collapsible dropdown for Data
 pg = st.navigation({
     "Project Info": [home_page, conclusions_page],
     "Data Pipeline": [preparation_page, data_exploration_page, analysis_page]
