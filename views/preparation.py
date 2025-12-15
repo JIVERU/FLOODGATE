@@ -44,7 +44,7 @@ st.markdown('<div class="section-title">Feature Engineering</div>', unsafe_allow
 
 st.markdown("""
 <div class="section-description">
-        To answer our research questions about <b>Efficiency</b> and <b>Cost Drivers</b>, 
+        To better answer our research questions, 
         we derived new metrics from the existing raw columns.
 </div>
 """, unsafe_allow_html=True)
